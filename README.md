@@ -16,16 +16,19 @@ Agent/
 ## Agents
 
 ### first_agent
+
 A helpful assistant agent using Gemini 2.5 Flash model.
 
 ## Setup
 
 1. Create a virtual environment:
+
 ```bash
 python -m venv .venv
 ```
 
 2. Activate the virtual environment:
+
 ```bash
 # Windows
 .venv\Scripts\activate
@@ -35,6 +38,7 @@ source .venv/bin/activate
 ```
 
 3. Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -51,4 +55,3 @@ Each agent folder contains its own implementation. Import and use agents as need
 ## License
 
 [Add your license here]
-
