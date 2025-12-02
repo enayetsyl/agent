@@ -1,0 +1,4 @@
+# Google ADK dependencies
+# Add your specific ADK package requirements here
+# Example: google-adk or google-cloud-aiplatform
+
