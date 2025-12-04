@@ -8,10 +8,8 @@
 
 // Connect the server with SSE
 const sessionId = Math.random().toString().substring(10);
-const sse_url =
-  "http://" + window.location.host + "/events/" + sessionId;
-const send_url =
-  "http://" + window.location.host + "/send/" + sessionId;
+const sse_url = "http://" + window.location.host + "/events/" + sessionId;
+const send_url = "http://" + window.location.host + "/send/" + sessionId;
 let eventSource = null;
 let is_audio = false;
 
@@ -95,6 +93,8 @@ function connectSSE() {
     console.log("SSE connection error or closed.");
     document.getElementById("sendButton").disabled = true;
     document.getElementById("messages").textContent = "Connection closed";
+    // Clean up audio recording timer when connection closes
+    stopAudioRecording();
     eventSource.close();
     setTimeout(function () {
       console.log("Reconnecting...");
@@ -128,18 +128,18 @@ function addSubmitHandler() {
 async function sendMessage(message) {
   try {
     const response = await fetch(send_url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(message)
+      body: JSON.stringify(message),
     });
-    
+
     if (!response.ok) {
-      console.error('Failed to send message:', response.statusText);
+      console.error("Failed to send message:", response.statusText);
     }
   } catch (error) {
-    console.error('Error sending message:', error);
+    console.error("Error sending message:", error);
   }
 }
 
@@ -170,7 +170,7 @@ let bufferTimer = null;
 
 // Import the audio worklets
 import { startAudioPlayerWorklet } from "./audio-player.js";
-import { startAudioRecorderWorklet } from "./audio-recorder.js";
+import { startAudioRecorderWorklet, stopMicrophone } from "./audio-recorder.js";
 
 // Start audio
 function startAudio() {
@@ -204,7 +204,7 @@ startAudioButton.addEventListener("click", () => {
 function audioRecorderHandler(pcmData) {
   // Add audio data to buffer
   audioBuffer.push(new Uint8Array(pcmData));
-  
+
   // Start timer if not already running
   if (!bufferTimer) {
     bufferTimer = setInterval(sendBufferedAudio, 200); // 0.2 seconds
@@ -216,13 +216,13 @@ function sendBufferedAudio() {
   if (audioBuffer.length === 0) {
     return;
   }
-  
+
   // Calculate total length
   let totalLength = 0;
   for (const chunk of audioBuffer) {
     totalLength += chunk.length;
   }
-  
+
   // Combine all chunks into a single buffer
   const combinedBuffer = new Uint8Array(totalLength);
   let offset = 0;
@@ -230,14 +230,14 @@ function sendBufferedAudio() {
     combinedBuffer.set(chunk, offset);
     offset += chunk.length;
   }
-  
+
   // Send the combined audio data
   sendMessage({
     mime_type: "audio/pcm",
     data: arrayBufferToBase64(combinedBuffer.buffer),
   });
   console.log("[CLIENT TO AGENT] sent %s bytes", combinedBuffer.byteLength);
-  
+
   // Clear the buffer
   audioBuffer = [];
 }
@@ -248,12 +248,26 @@ function stopAudioRecording() {
     clearInterval(bufferTimer);
     bufferTimer = null;
   }
-  
+
   // Send any remaining buffered audio
   if (audioBuffer.length > 0) {
     sendBufferedAudio();
   }
+
+  // Stop microphone stream if it exists
+  if (micStream) {
+    stopMicrophone(micStream);
+    micStream = null;
+  }
 }
+
+// Cleanup on page unload
+window.addEventListener("beforeunload", function () {
+  stopAudioRecording();
+  if (eventSource) {
+    eventSource.close();
+  }
+});
 
 // Encode an array buffer with Base64
 function arrayBufferToBase64(buffer) {
