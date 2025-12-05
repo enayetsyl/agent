@@ -2,10 +2,9 @@ import express from "express";
 import cors from "cors";
 import env from "./config/env";
 import logger from "./utils/logger";
-
-// Import routes (will be created in next phase)
-// import productRoutes from "./routes/products.routes";
-// import agentRoutes from "./routes/agent.routes";
+import productRoutes from "./routes/products.routes";
+import agentRoutes from "./routes/agent.routes";
+import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
 
@@ -31,9 +30,9 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Routes (commented out until routes are implemented)
-// app.use("/api/products", productRoutes);
-// app.use("/api/agent", agentRoutes);
+// Routes
+app.use("/api/products", productRoutes);
+app.use("/api/agent", agentRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -43,20 +42,8 @@ app.use((req, res) => {
   });
 });
 
-// Error handling middleware
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  logger.error("Unhandled error", err, {
-    path: req.path,
-    method: req.method,
-  });
-
-  res.status(500).json({
-    error: "Internal Server Error",
-    message: env.NODE_ENV === "production" 
-      ? "An error occurred" 
-      : err.message,
-  });
-});
+// Error handling middleware (must be last)
+app.use(errorHandler);
 
 // Start server
 const PORT = env.PORT;
@@ -69,4 +56,3 @@ app.listen(PORT, () => {
 });
 
 export default app;
-
