@@ -1,0 +1,12 @@
+# Database connection files
+*.env
+*.env.local
+
+# Database dumps
+*.sql.backup
+*.dump
+*.pg_dump
+
+# Log files
+*.log
+
