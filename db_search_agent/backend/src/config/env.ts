@@ -15,6 +15,7 @@ const envSchema = z.object({
     .transform((val) => parseInt(val, 10)),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   SHADOW_DATABASE_URL: z.string().optional(),
+  AGENT_SERVER_URL: z.string().default("http://localhost:8000"),
 });
 
 // Validate environment variables

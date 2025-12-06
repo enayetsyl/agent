@@ -51,6 +51,7 @@ def search_products_mcp(
             p.price, p.compare_at_price, p.brand, p.featured,
             c.id as category_id, c.name as category_name, c.slug as category_slug,
             COUNT(DISTINCT v.id) FILTER (WHERE v.stock_quantity > 0) as in_stock_variants,
+            COALESCE(SUM(v.stock_quantity), 0) as total_stock_quantity,
             COUNT(DISTINCT v.id) as total_variants,
             (
                 SELECT url FROM product_images pi
@@ -67,11 +68,42 @@ def search_products_mcp(
         params = {}
 
         if query:
-            conditions.append("""
-                (p.name ILIKE :query OR p.description ILIKE :query 
-                 OR p.short_description ILIKE :query OR p.brand ILIKE :query)
-            """)
+            # Improved search: handle hyphens/spaces, partial matches, and category names
+            # This helps match "T shirt" with "T-Shirt", "red t shirt" with "Red Cotton T-Shirt", etc.
+            # Normalize query: remove hyphens and normalize spaces for better matching
+            query_normalized = query.lower().replace('-', ' ').strip()
+            query_words = [w for w in query_normalized.split() if len(w) > 1]  # Filter out single characters
+            
+            # Build search conditions - try multiple matching strategies
+            search_conditions = [
+                "p.name ILIKE :query",
+                "p.description ILIKE :query",
+                "p.short_description ILIKE :query",
+                "p.brand ILIKE :query",
+                "REPLACE(LOWER(p.name), '-', ' ') LIKE :query_normalized",
+                "REPLACE(LOWER(p.name), ' ', '-') LIKE REPLACE(:query_normalized, ' ', '-')",
+                "REPLACE(LOWER(p.description), '-', ' ') LIKE :query_normalized",
+                "REPLACE(LOWER(p.short_description), '-', ' ') LIKE :query_normalized",
+                "c.name ILIKE :query",
+                "c.slug ILIKE :query"
+            ]
+            
+            # Add word-by-word matching: if all important words appear in product name
+            # This helps "red t shirt" match "Red Cotton T-Shirt"
+            if len(query_words) > 1:
+                word_like_conditions = []
+                for i, word in enumerate(query_words):
+                    param_name = f'word_{i}'
+                    word_like_conditions.append(f"LOWER(p.name) LIKE :{param_name}")
+                    params[param_name] = f'%{word}%'
+                
+                if word_like_conditions:
+                    # Match if all words appear in the name
+                    search_conditions.append(f"({' AND '.join(word_like_conditions)})")
+            
+            conditions.append(f"({' OR '.join(search_conditions)})")
             params['query'] = f'%{query}%'
+            params['query_normalized'] = f'%{query_normalized}%'
 
         if category:
             conditions.append("(c.slug = :category OR c.name ILIKE :category)")
@@ -101,6 +133,7 @@ def search_products_mcp(
                  p.price, p.compare_at_price, p.brand, p.featured,
                  c.id, c.name, c.slug
         """
+        
 
         # Filter by stock availability
         if in_stock:
@@ -122,6 +155,8 @@ def search_products_mcp(
 
         products = []
         for row in result.rows:
+            # Column order: id, name, slug, desc, short_desc, price, compare_price, brand, featured,
+            #               cat_id, cat_name, cat_slug, in_stock_variants, total_stock_quantity, total_variants, image
             products.append({
                 "id": row[0],
                 "name": row[1],
@@ -138,8 +173,9 @@ def search_products_mcp(
                     "slug": row[11]
                 } if row[9] else None,
                 "inStock": row[12] > 0 if row[12] is not None else False,
-                "totalVariants": row[13] if row[13] else 0,
-                "image": row[14] if row[14] else None
+                "stockQuantity": int(row[13]) if len(row) > 13 and row[13] is not None else 0,
+                "totalVariants": row[14] if len(row) > 14 and row[14] is not None else 0,
+                "image": row[15] if len(row) > 15 and row[15] else None
             })
 
         return {
@@ -491,6 +527,109 @@ def check_product_availability_mcp(
         return {
             "status": "error",
             "error_message": f"Failed to check availability: {str(e)}"
+        }
+
+
+def get_product_variants_mcp(
+    mcp_toolbox: MCPToolboxForDatabases,
+    product_id: Optional[int] = None,
+    product_name: Optional[str] = None
+) -> Dict:
+    """
+    Get all variants (sizes, colors, etc.) for a product using MCP database tools.
+    This is useful when users ask about available sizes or colors.
+
+    Args:
+        mcp_toolbox: MCP Toolbox instance for database access
+        product_id: The ID of the product (preferred)
+        product_name: Product name to search for if ID not provided
+
+    Returns:
+        dict: Product variants with attributes (sizes, colors, etc.)
+    """
+    try:
+        # If product_name provided but not product_id, find the product first
+        if product_name and not product_id:
+            logger.info(f"Searching for product by name: {product_name}")
+            search_result = search_products_mcp(
+                mcp_toolbox=mcp_toolbox,
+                query=product_name,
+                limit=1
+            )
+            if search_result.get("status") == "success" and search_result.get("products"):
+                product_id = search_result["products"][0]["id"]
+            else:
+                return {
+                    "status": "error",
+                    "error_message": f"Product '{product_name}' not found"
+                }
+
+        if not product_id:
+            return {
+                "status": "error",
+                "error_message": "Product ID or name is required"
+            }
+
+        logger.info(f"Fetching variants for product ID: {product_id}")
+
+        # Get all variants with their attributes
+        sql_query = """
+        SELECT
+            v.id, v.name, v.sku, v.price, v.compare_at_price,
+            v.stock_quantity, v.track_inventory,
+            json_object_agg(va.attribute_name, va.attribute_value) as attributes
+        FROM product_variants v
+        LEFT JOIN variant_attributes va ON v.id = va.variant_id
+        WHERE v.product_id = :product_id
+        GROUP BY v.id, v.name, v.sku, v.price, v.compare_at_price,
+                 v.stock_quantity, v.track_inventory
+        ORDER BY v.stock_quantity DESC
+        """
+
+        result = mcp_toolbox.execute_sql(
+            query=sql_query,
+            parameters={'product_id': product_id}
+        )
+
+        variants = []
+        sizes = set()
+        colors = set()
+        
+        for row in result.rows:
+            import json
+            attributes = json.loads(row[7]) if isinstance(row[7], str) else row[7] if row[7] else {}
+            
+            variant = {
+                "id": row[0],
+                "name": row[1],
+                "sku": row[2],
+                "price": float(row[3]) if row[3] else None,
+                "compareAtPrice": float(row[4]) if row[4] else None,
+                "stockQuantity": row[5],
+                "trackInventory": row[6],
+                "attributes": attributes
+            }
+            variants.append(variant)
+            
+            # Extract sizes and colors
+            if 'size' in attributes:
+                sizes.add(attributes['size'])
+            if 'color' in attributes:
+                colors.add(attributes['color'])
+
+        return {
+            "status": "success",
+            "productId": product_id,
+            "variants": variants,
+            "availableSizes": sorted(list(sizes)) if sizes else [],
+            "availableColors": sorted(list(colors)) if colors else [],
+            "totalVariants": len(variants)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching product variants: {str(e)}", exc_info=True)
+        return {
+            "status": "error",
+            "error_message": f"Failed to get product variants: {str(e)}"
         }
 
 

@@ -1,36 +1,64 @@
 import logger from "../utils/logger";
 import { CustomError } from "../middleware/errorHandler";
+import env from "../config/env";
+
+const AGENT_SERVER_URL = env.AGENT_SERVER_URL || "http://localhost:8000";
 
 export async function queryAgent(
   userMessage: string,
   sessionId: string
 ): Promise<string> {
   try {
-    // This is a placeholder implementation
-    // In production, you would:
-    // Option 1: Call Python agent via HTTP (if you set up a Python HTTP server)
-    // Option 2: Use ADK Node.js SDK if available
-    // Option 3: Use subprocess (not recommended for production)
-    // Option 4: Use WebSocket for real-time communication
-
     logger.info("Agent query received", {
       message: userMessage,
       sessionId,
     });
 
-    // Placeholder response - replace with actual ADK agent integration
-    // For now, return a simple acknowledgment
-    return `Agent received your message: "${userMessage}". Agent integration will be implemented in the next phase.`;
+    // Call Python agent HTTP server
+    const response = await fetch(`${AGENT_SERVER_URL}/query`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: userMessage,
+        sessionId: sessionId || undefined,
+      }),
+    });
 
-    // Example HTTP call to Python agent (when implemented):
-    // const response = await fetch('http://localhost:8000/agent/query', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify({ message: userMessage, sessionId })
-    // });
-    // const data = await response.json();
-    // return data.response;
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error("Agent server error", {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+      });
+      throw new CustomError(
+        `Agent server error: ${response.statusText}`,
+        response.status
+      );
+    }
+
+    const data = await response.json();
+
+    if (data.status === "error") {
+      logger.error("Agent returned error", { error: data.error });
+      throw new CustomError(
+        data.error || "Agent returned an error",
+        500
+      );
+    }
+
+    logger.info("Agent query successful", {
+      sessionId,
+      responseLength: data.response?.length || 0,
+    });
+
+    return data.response || "No response from agent";
   } catch (error) {
+    if (error instanceof CustomError) {
+      throw error;
+    }
     logger.error("Error querying agent", error);
     throw new CustomError("Failed to query agent", 500);
   }

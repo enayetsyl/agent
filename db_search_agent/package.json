@@ -1,0 +1,22 @@
+{
+  "name": "db-search-agent",
+  "version": "1.0.0",
+  "description": "Full-stack e-commerce product catalog with AI agent",
+  "scripts": {
+    "start": "node start-all.js",
+    "start:backend": "cd backend && npm run dev",
+    "start:agent": "cd adk-agent && python agent_server.py",
+    "start:frontend": "cd frontend && npm run dev",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "setup": "npm run install:all && cd backend && npm run db:generate"
+  },
+  "keywords": [
+    "ecommerce",
+    "ai",
+    "agent",
+    "adk"
+  ],
+  "author": "",
+  "license": "ISC"
+}
+
