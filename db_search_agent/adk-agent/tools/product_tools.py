@@ -68,42 +68,19 @@ def search_products_mcp(
         params = {}
 
         if query:
-            # Improved search: handle hyphens/spaces, partial matches, and category names
-            # This helps match "T shirt" with "T-Shirt", "red t shirt" with "Red Cotton T-Shirt", etc.
-            # Normalize query: remove hyphens and normalize spaces for better matching
-            query_normalized = query.lower().replace('-', ' ').strip()
-            query_words = [w for w in query_normalized.split() if len(w) > 1]  # Filter out single characters
-            
-            # Build search conditions - try multiple matching strategies
-            search_conditions = [
-                "p.name ILIKE :query",
-                "p.description ILIKE :query",
-                "p.short_description ILIKE :query",
-                "p.brand ILIKE :query",
-                "REPLACE(LOWER(p.name), '-', ' ') LIKE :query_normalized",
-                "REPLACE(LOWER(p.name), ' ', '-') LIKE REPLACE(:query_normalized, ' ', '-')",
-                "REPLACE(LOWER(p.description), '-', ' ') LIKE :query_normalized",
-                "REPLACE(LOWER(p.short_description), '-', ' ') LIKE :query_normalized",
-                "c.name ILIKE :query",
-                "c.slug ILIKE :query"
-            ]
-            
-            # Add word-by-word matching: if all important words appear in product name
-            # This helps "red t shirt" match "Red Cotton T-Shirt"
-            if len(query_words) > 1:
-                word_like_conditions = []
-                for i, word in enumerate(query_words):
-                    param_name = f'word_{i}'
-                    word_like_conditions.append(f"LOWER(p.name) LIKE :{param_name}")
-                    params[param_name] = f'%{word}%'
-                
-                if word_like_conditions:
-                    # Match if all words appear in the name
-                    search_conditions.append(f"({' AND '.join(word_like_conditions)})")
-            
-            conditions.append(f"({' OR '.join(search_conditions)})")
+            # Improved search: handle hyphens/spaces and also search in category names
+            # This helps match "T shirt" with "T-Shirt" and "apparel" with category name
+            conditions.append("""
+                (p.name ILIKE :query 
+                 OR p.description ILIKE :query 
+                 OR p.short_description ILIKE :query 
+                 OR p.brand ILIKE :query
+                 OR REPLACE(LOWER(p.name), '-', ' ') LIKE REPLACE(LOWER(:query), '-', ' ')
+                 OR REPLACE(LOWER(p.name), ' ', '-') LIKE REPLACE(LOWER(:query), ' ', '-')
+                 OR c.name ILIKE :query
+                 OR c.slug ILIKE :query)
+            """)
             params['query'] = f'%{query}%'
-            params['query_normalized'] = f'%{query_normalized}%'
 
         if category:
             conditions.append("(c.slug = :category OR c.name ILIKE :category)")
