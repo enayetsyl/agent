@@ -75,6 +75,7 @@ from tools.product_tools import (
     get_product_variants_mcp,
     get_categories_mcp
 )
+from tools.image_search import search_images
 
 # Create tool wrappers
 def search_products(
@@ -166,6 +167,39 @@ def get_categories() -> Dict:
     return get_categories_mcp(mcp_toolbox=mcp_toolbox)
 
 
+def search_product_images(query: str, count: int = 3) -> Dict:
+    """
+    Search for product images - FIRST checks database, then falls back to Unsplash.
+    
+    CRITICAL: Use this tool ALWAYS when users ask for images, pictures, photos, or ask to "show me the picture".
+    This tool MUST be called - never say images are unavailable without calling this first!
+    
+    IMPORTANT: The tool will:
+    1. FIRST search the database for product images matching the query
+    2. If found, return database images (these are the actual product images)
+    3. If not found, fall back to Unsplash search
+    
+    You can pass either:
+    - Simple product types: "t-shirt", "jeans", "pants"
+    - Full product names: "Red Cotton T-Shirt", "Blue Denim Jeans" (will search database first)
+    
+    Examples: 
+    - "show me images of pants" → use query="pants" (searches DB first, then Unsplash)
+    - "can you show me the picture" (after discussing "Red Cotton T-Shirt") → use query="Red Cotton T-Shirt" (searches DB first!)
+    - "I want to see pictures of jeans" → use query="jeans"
+    
+    Args:
+        query: Product name or type to search for (e.g., "t-shirt", "Red Cotton T-Shirt", "jeans")
+               Can be simple type or full product name - database search handles both.
+        count: Number of images to return (default: 3, max: 10)
+    
+    Returns:
+        Dict with 'images' array containing image objects with 'url' field
+        Images from database are prioritized over Unsplash images.
+    """
+    return search_images(query=query, count=count, mcp_toolbox=mcp_toolbox)
+
+
 # Shared instruction for both agents
 shared_instruction = (
     "You are a helpful product assistant. Help users find products by searching the catalog. "
@@ -220,6 +254,8 @@ shared_instruction = (
     "- search_products(): Only when user is searching for NEW products or browsing categories. "
     "- get_product_variants(): When user asks about sizes/colors/attributes of a product (from context or explicitly mentioned). "
     "- get_product_details(): When user asks for detailed information about a specific product. "
+    "- search_product_images(): ALWAYS use when user asks to see images, pictures, photos, or asks 'show me the picture'. "
+    "  This is MANDATORY - never say images are unavailable without calling this tool first! "
     ""
     "HOW TO EXTRACT PRODUCT NAME FROM CONTEXT: "
     "- Look for product names in the last few messages: 'jeans', 'Blue Denim Jeans', 'red cotton t shirt', 'Red Cotton T-Shirt', etc. "
@@ -235,11 +271,41 @@ shared_instruction = (
     "  * User asks 'warranty?' → Say 'Warranty information is not available for this product' "
     "  * User asks 'shipping cost?' → Say 'Shipping information is not available' "
     "  * NEVER say 'I don't have the functionality' or 'I cannot fulfill this request' - just state the feature is not available. "
-    "- If product images are requested: "
-    "  * Check if the product has an 'image' field in the search results or product details. "
-    "  * If image exists, you can mention that images are available (though you can't display them in chat). "
-    "  * If no image field, say 'Images are not available for this product' or 'Product images are not currently available'. "
-    "  * NEVER say 'I cannot show pictures' - just state images are not available in the catalog. "
+    "CRITICAL: IMAGE REQUESTS - YOU MUST USE search_product_images() TOOL: "
+    "  * When users ask for images, pictures, photos, or to 'show'/'see' images, you MUST use search_product_images() tool. "
+    "  * Common phrases that trigger image search (MUST call the tool for ANY of these): "
+    "    - 'show me the picture', 'show me pictures', 'show me images', 'show me photos' "
+    "    - 'can you show me the picture', 'can you show me pictures', 'can I see the picture' "
+    "    - 'I want to see pictures', 'I want to see images', 'I want to see the image' "
+    "    - 'do you have images', 'are there pictures', 'show images of [product]' "
+    "    - 'picture', 'image', 'photo', 'images' (when used in context of asking to see something) "
+    "    - 'picture of it', 'image of it', 'photo of it' "
+    "  * If the user mentions ANY word related to seeing/viewing images, you MUST call search_product_images()! "
+    "  * ALWAYS extract the product name from conversation context if not explicitly mentioned. "
+    "  * IMPORTANT: When calling search_product_images(), use the FULL product name from context when available! "
+    "  * The tool FIRST searches the database for product images, then falls back to Unsplash. "
+    "  * Examples: "
+    "    - If user discussed 'Red Cotton T-Shirt' → use search_product_images(query='Red Cotton T-Shirt') to get DB images! "
+    "    - If user discussed 'Blue Denim Jeans' → use search_product_images(query='Blue Denim Jeans') to get DB images! "
+    "    - If only product type mentioned (e.g., 't-shirt') → use search_product_images(query='t-shirt') "
+    "  * CRITICAL: Using the full product name (e.g., 'Red Cotton T-Shirt') will search the database first "
+    "    and return the actual product images from your catalog, which is what users want to see! "
+    "  * Only use simple product types (e.g., 't-shirt') if the full product name is not available from context. "
+    "  * NEVER say 'Images are not available' - ALWAYS call search_product_images() first! "
+    "  * After calling search_product_images(query='product_name'), you will get a dict with an 'images' array. "
+    "  * Each item in 'images' has a 'url' field. Extract ALL URLs from the 'images' array. "
+    "  * Format your response EXACTLY as: 'Here are some images: [[IMAGE_URLS:url1,url2,url3]]' "
+    "  * IMPORTANT: Separate URLs with commas, no spaces. Include ALL image URLs from the result. "
+    "  * CRITICAL: You MUST include the [[IMAGE_URLS:...]] format in your response, otherwise images won't display! "
+    "  * Example flow: "
+    "    User: 'do you have t shirt' "
+    "    You: [Show product details for 'Red Cotton T-Shirt'] "
+    "    User: 'can you show me the picture' "
+    "    You: [STEP 1: Call search_product_images(query='t-shirt')] "
+    "    You: [STEP 2: Get result with 'images' array, e.g., {'images': [{'url': 'url1'}, {'url': 'url2'}]}] "
+    "    You: [STEP 3: Extract all URLs: url1, url2] "
+    "    You: [STEP 4: Format response: 'Here are some images of the t-shirt: [[IMAGE_URLS:url1,url2]]'] "
+    "  * CRITICAL: The [[IMAGE_URLS:...]] format is REQUIRED - without it, images won't display in the UI! "
     ""
     "SEARCH IMPROVEMENTS: "
     "- When searching, the search function handles multiple variations automatically. 'red t shirt' should match 'Red Cotton T-Shirt'. "
@@ -290,7 +356,8 @@ chat_agent = Agent(
         get_product_by_slug,
         check_product_availability,
         get_product_variants,
-        get_categories
+        get_categories,
+        search_product_images
     ]
 )
 
@@ -306,7 +373,8 @@ voice_agent = Agent(
         get_product_by_slug,
         check_product_availability,
         get_product_variants,
-        get_categories
+        get_categories,
+        search_product_images
     ]
 )
 

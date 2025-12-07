@@ -379,13 +379,74 @@ async def query_agent(request: AgentQueryRequest):
         
         # Collect response from generator
         response_parts = []
-        for event in response_generator:
-            if hasattr(event, 'content') and event.content:
-                for part in event.content.parts:
-                    if hasattr(part, 'text') and part.text:
-                        response_parts.append(part.text)
+        generator_error = None
+        try:
+            # Try to get at least one event from the generator
+            event_count = 0
+            for event in response_generator:
+                event_count += 1
+                if hasattr(event, 'content') and event.content:
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            response_parts.append(part.text)
+            
+            # If generator completed without yielding any events, it might have failed silently
+            if event_count == 0 and not response_parts:
+                # Check if there's a rate limit issue by checking recent logs or error state
+                # For now, assume it's a rate limit if no events were yielded
+                generator_error = "Rate limit exceeded - no response from API"
+                
+        except Exception as gen_error:
+            # Handle errors from the generator (e.g., rate limits)
+            generator_error = gen_error
+            error_str = str(gen_error)
+            print(f"Error in response generator: {error_str}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
         
-        response_text = " ".join(response_parts) if response_parts else "No response received"
+        # Handle generator errors (including silent failures)
+        if generator_error:
+            error_str = str(generator_error)
+            
+            # Check for rate limit errors
+            if ("429" in error_str or "RESOURCE_EXHAUSTED" in error_str or 
+                "quota" in error_str.lower() or "Rate limit" in error_str):
+                user_message = (
+                    "I'm sorry, but I've reached the API rate limit for today. "
+                    "The free tier allows 20 requests per day. Please try again later, "
+                    "or check your usage at https://ai.dev/usage?tab=rate-limit"
+                )
+                return AgentQueryResponse(
+                    status="error",
+                    response=user_message,
+                    sessionId=session_id,
+                    error="Rate limit exceeded"
+                )
+            else:
+                # Other errors
+                return AgentQueryResponse(
+                    status="error",
+                    response=f"I encountered an error: {error_str}",
+                    sessionId=session_id,
+                    error=error_str
+                )
+        
+        # If no response parts and no error, it might be a silent failure
+        if not response_parts:
+            # Check if this might be a rate limit issue
+            user_message = (
+                "I'm sorry, but I couldn't get a response. This might be due to API rate limits. "
+                "The free tier allows 20 requests per day. Please try again later, "
+                "or check your usage at https://ai.dev/usage?tab=rate-limit"
+            )
+            return AgentQueryResponse(
+                status="error",
+                response=user_message,
+                sessionId=session_id,
+                error="No response received - possible rate limit"
+            )
+        
+        response_text = " ".join(response_parts)
         
         return AgentQueryResponse(
             status="success",
@@ -397,9 +458,24 @@ async def query_agent(request: AgentQueryRequest):
         print(f"Error querying agent: {error_message}", file=sys.stderr)
         import traceback
         traceback.print_exc()
+        
+        # Check for rate limit errors
+        if "429" in error_message or "RESOURCE_EXHAUSTED" in error_message or "quota" in error_message.lower():
+            user_message = (
+                "I'm sorry, but I've reached the API rate limit for today. "
+                "The free tier allows 20 requests per day. Please try again later, "
+                "or check your usage at https://ai.dev/usage?tab=rate-limit"
+            )
+            return AgentQueryResponse(
+                status="error",
+                response=user_message,
+                sessionId=request.sessionId,
+                error="Rate limit exceeded"
+            )
+        
         return AgentQueryResponse(
             status="error",
-            response="",
+            response=f"I encountered an error: {error_message}",
             sessionId=request.sessionId,
             error=error_message
         )

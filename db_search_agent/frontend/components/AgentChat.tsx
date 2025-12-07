@@ -7,6 +7,7 @@ interface Message {
   role: "user" | "agent";
   content: string;
   timestamp: Date;
+  images?: string[];
 }
 
 export default function AgentChat() {
@@ -90,6 +91,31 @@ export default function AgentChat() {
               }`}
             >
               <p className="whitespace-pre-wrap break-words">{message.content}</p>
+              {message.images && message.images.length > 0 && (
+                <div className={`mt-3 grid gap-2 ${
+                  message.images.length === 1 
+                    ? 'grid-cols-1' 
+                    : message.images.length === 2 
+                    ? 'grid-cols-2' 
+                    : 'grid-cols-2 md:grid-cols-3'
+                }`}>
+                  {message.images.map((imageUrl, imgIndex) => (
+                    <div key={imgIndex} className="rounded-lg overflow-hidden bg-gray-200">
+                      <img
+                        src={imageUrl}
+                        alt={`Product image ${imgIndex + 1}`}
+                        className="w-full h-auto object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                        loading="lazy"
+                        onClick={() => window.open(imageUrl, '_blank')}
+                        onError={(e) => {
+                          // Hide image on error
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ))}
